@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Share2, Copy, Check, ExternalLink, Download, AlertCircle, X as CloseIcon, Loader2, Sparkles, RefreshCw } from 'lucide-react';
+import { Share2, Copy, Check, ExternalLink, Download, AlertCircle, X as CloseIcon, Loader2, Sparkles, RefreshCw, Smartphone, Monitor } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AppFormat, PFPFrameConfig, IDCardConfig } from '../types/frame';
-import { prepareXShare, ShareResult } from '../utils/shareUtils';
+import { prepareXShare, ShareResult, canNativeShareFiles, executeNativeFileShare } from '../utils/shareUtils';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -28,6 +28,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [statusText, setStatusText] = useState<string>('Preparing image...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [shareData, setShareData] = useState<ShareResult | null>(null);
+  const [hasNativeShare, setHasNativeShare] = useState<boolean>(false);
+  const [desktopInstructionNotice, setDesktopInstructionNotice] = useState<boolean>(false);
+
+  // Check device capability for native Web Share file support
+  useEffect(() => {
+    setHasNativeShare(canNativeShareFiles());
+  }, []);
 
   const startPreparation = useCallback(async () => {
     if (!userImg) return;
@@ -58,6 +65,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setShareData(null);
       setErrorMessage(null);
       setIsProcessing(false);
+      setDesktopInstructionNotice(false);
     }
   }, [isOpen, userImg, startPreparation]);
 
@@ -75,8 +83,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setTimeout(() => setCopied(false), 3000);
   };
 
-  const handlePostToX = () => {
-    if (!shareData || !shareData.tweetUrl) {
+  const handlePostToX = async () => {
+    if (!shareData) {
       startPreparation();
       return;
     }
@@ -91,10 +99,21 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       // ignore
     }
 
+    // 1. Mobile Native Web Share API (Passes actual PNG File + caption + public URL to X app)
+    if (hasNativeShare) {
+      const shared = await executeNativeFileShare(shareData.pngBlob, shareData.shareUrl, shareData.pngFileName);
+      if (shared) return;
+    }
+
+    // 2. Desktop Fallback (Auto-Downloads PNG, Copies Caption, Opens X Intent)
+    onDownload(); // Automatically download 2048px PNG
     navigator.clipboard.writeText(captionText);
     setCopied(true);
+    setDesktopInstructionNotice(true);
 
-    window.open(shareData.tweetUrl, '_blank', 'noopener,noreferrer');
+    if (shareData.tweetUrl) {
+      window.open(shareData.tweetUrl, '_blank', 'noopener,noreferrer');
+    }
   };
 
   const formatTitle = format === 'PFP_FRAME' ? 'Format A — Profile Overlay' : 'Format B — Builder ID Card';
@@ -154,20 +173,33 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs space-y-1.5 font-mono">
             <div className="font-bold text-emerald-400 flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-400" />
-              <span>X Card Preview Ready</span>
+              <span>Public Share Link & Graphic Ready</span>
             </div>
             <p className="text-[11px] text-slate-300 font-sans leading-relaxed">
-              Unique share link created: <span className="font-mono text-emerald-300 font-bold break-all">{shareData.shareUrl}</span>
+              Public Link: <span className="font-mono text-emerald-300 font-bold break-all">{shareData.shareUrl}</span>
             </p>
           </div>
         ) : null}
+
+        {/* Desktop Auto-Download Notice Banner */}
+        {desktopInstructionNotice && !hasNativeShare && (
+          <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-sans space-y-1 animate-fadeIn">
+            <p className="font-bold text-amber-300 flex items-center gap-1.5">
+              <Download className="w-4 h-4 text-amber-400" />
+              Image Downloaded & Caption Copied!
+            </p>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              X composer is open! Simply click the <span className="text-white font-bold">Media / Image icon</span> in X and select your downloaded PNG file to attach it.
+            </p>
+          </div>
+        )}
 
         {/* Caption Preview Box */}
         <div className="space-y-2">
           <div className="flex justify-between items-center text-xs font-mono text-slate-300">
             <span className="flex items-center gap-1.5 text-amber-300 font-bold">
               <Sparkles className="w-3.5 h-3.5" />
-              Pre-filled X Caption & Share Link
+              Pre-filled X Caption & Public Link
             </span>
             {currentShareUrl && (
               <button
@@ -182,6 +214,28 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           <div className="p-4 rounded-2xl bg-slate-950 border border-white/15 text-slate-200 font-sans text-sm whitespace-pre-line break-all">
             {captionText}
           </div>
+        </div>
+
+        {/* Device Capability Guidance Box */}
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-white/10 text-xs space-y-1.5 text-slate-300 font-mono">
+          <div className="font-bold text-amber-400 flex items-center gap-1.5">
+            {hasNativeShare ? (
+              <>
+                <Smartphone className="w-4 h-4 text-emerald-400" />
+                <span className="text-emerald-400">Mobile Native Image Sharing:</span>
+              </>
+            ) : (
+              <>
+                <Monitor className="w-4 h-4 text-amber-400" />
+                <span>Desktop Share Guidance:</span>
+              </>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-300 font-sans leading-relaxed">
+            {hasNativeShare
+              ? 'Your FrameInGoa image will be shared as an actual image file attached as media along with your caption and public verification link via native device share sheet.'
+              : 'Your high-resolution PNG image will be downloaded and X will open with your caption and public link. Simply attach the downloaded image file before posting!'}
+          </p>
         </div>
 
         {/* Modal Action Buttons */}
@@ -207,7 +261,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             ) : (
               <>
                 <ExternalLink className="w-4 h-4" />
-                <span>Post to X (#FrameInGoa)</span>
+                <span>{hasNativeShare ? 'Post Image to X' : 'Post to X (#FrameInGoa)'}</span>
               </>
             )}
           </button>
