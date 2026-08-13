@@ -22,7 +22,7 @@ import { FullScreenPreviewModal } from './components/FullScreenPreviewModal';
 import { ShareModal } from './components/ShareModal';
 import { MobileActionBar } from './components/MobileActionBar';
 import { Footer } from './components/Footer';
-import { Loader2, AlertCircle, Sparkles, Sliders } from 'lucide-react';
+import { Loader2, AlertCircle, Sparkles, Sliders, CheckCircle2, X as CloseIcon } from 'lucide-react';
 
 const DEFAULT_TRANSFORM: ImageTransform = {
   x: 0,
@@ -67,6 +67,23 @@ export function App() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+
+  // Shared View state (for visitors opening a /share/:id link)
+  const [sharedViewInfo, setSharedViewInfo] = useState<{ id: string; imgUrl: string } | null>(null);
+
+  // Check URL query parameters for shared frame links
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const viewShare = params.get('viewShare');
+    const imgParam = params.get('img');
+
+    if (viewShare && imgParam) {
+      setSharedViewInfo({
+        id: viewShare,
+        imgUrl: decodeURIComponent(imgParam)
+      });
+    }
+  }, []);
 
   // Load default sample avatar on initial startup
   useEffect(() => {
@@ -199,6 +216,37 @@ export function App() {
 
       {/* Hero Banner */}
       <LandingHero onStartFormat={handleSelectFormat} />
+
+      {/* Shared Frame Visitor Modal Banner */}
+      {sharedViewInfo && (
+        <div className="max-w-4xl mx-auto px-4 w-full mt-4">
+          <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-cyan-500/20 border border-amber-500/40 text-left shadow-2xl flex flex-col sm:flex-row items-center gap-4 relative">
+            <button
+              onClick={() => setSharedViewInfo(null)}
+              className="absolute top-3 right-3 p-1.5 rounded-xl bg-slate-900/80 text-slate-400 hover:text-white"
+            >
+              <CloseIcon className="w-4 h-4" />
+            </button>
+            <img
+              src={sharedViewInfo.imgUrl}
+              alt="Shared Frame"
+              className="w-24 h-24 object-contain rounded-2xl border border-amber-400/50 shadow-lg shrink-0"
+            />
+            <div className="flex-1 space-y-1">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs font-mono font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Verified Builder Identity ({sharedViewInfo.id})
+              </span>
+              <h4 className="font-display font-extrabold text-base text-white">
+                Viewing Shared HH Goa 2026 Frame
+              </h4>
+              <p className="text-xs text-slate-300">
+                You can create your own custom HH Goa 2026 builder frame or ID pass below in seconds!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Interactive Workspace */}
       <main id="editor-workspace" className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">

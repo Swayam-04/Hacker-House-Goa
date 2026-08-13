@@ -53,28 +53,121 @@ export function generateUniqueShareId(): string {
 }
 
 /**
- * Uploads a PNG blob to public cloud image host (ImgBB)
+ * Upload Provider 1: tmpfiles.org (Free Public Image Storage, HTTP 200, CORS enabled)
  */
-async function uploadToPublicStorage(blob: Blob): Promise<string> {
+async function uploadToTmpFiles(blob: Blob): Promise<string> {
   const formData = new FormData();
-  formData.append('image', blob, 'framein-goa-builder.png');
+  formData.append('file', blob, 'framein-goa-builder.png');
 
-  // Primary: Upload via ImgBB Public API
-  const response = await fetch('https://api.imgbb.com/1/upload?key=6d207e02198a847e5b4a06c646980e41', {
+  const res = await fetch('https://tmpfiles.org/api/v1/upload', {
     method: 'POST',
     body: formData
   });
 
-  if (!response.ok) {
-    throw new Error(`Public storage upload failed (${response.status})`);
+  if (!res.ok) throw new Error(`tmpfiles.org upload status ${res.status}`);
+  const json = await res.json();
+  if (json && json.status === 'success' && json.data && json.data.url) {
+    // Convert view URL to direct download URL (tmpfiles.org/12345 -> tmpfiles.org/dl/12345)
+    const viewUrl = json.data.url;
+    const directUrl = viewUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+    return directUrl;
+  }
+  throw new Error('tmpfiles.org returned invalid format');
+}
+
+/**
+ * Upload Provider 2: Catbox.moe (Permanent Free File Host, Direct CDN)
+ */
+async function uploadToCatbox(blob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append('reqtype', 'fileupload');
+  formData.append('fileToUpload', blob, 'framein-goa-builder.png');
+
+  const res = await fetch('https://catbox.moe/user/api.php', {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!res.ok) throw new Error(`Catbox upload status ${res.status}`);
+  const url = await res.text();
+  if (url && url.startsWith('http')) {
+    return url.trim();
+  }
+  throw new Error('Catbox returned invalid URL');
+}
+
+/**
+ * Upload Provider 3: ImgBB Public API
+ */
+async function uploadToImgBB(blob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append('image', blob, 'framein-goa-builder.png');
+
+  const keys = [
+    '6d207e02198a847e5b4a06c646980e41',
+    '235ca2d95015e34749f76a5a0344d59a'
+  ];
+
+  for (const key of keys) {
+    try {
+      const res = await fetch(`https://api.imgbb.com/1/upload?key=${key}`, {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.data && (json.data.url || json.data.display_url)) {
+          return json.data.url || json.data.display_url;
+        }
+      }
+    } catch (e) {
+      // try next key
+    }
+  }
+  throw new Error('ImgBB storage keys failed');
+}
+
+/**
+ * Multi-Provider Public Image Storage Uploader
+ * Tries Provider 1 (Catbox) -> Provider 2 (tmpfiles.org) -> Provider 3 (ImgBB)
+ */
+export async function uploadToPublicStorage(blob: Blob): Promise<string> {
+  const errors: string[] = [];
+
+  // Try Catbox first
+  try {
+    console.log('[Share Engine] Attempting upload via Catbox...');
+    const catboxUrl = await uploadToCatbox(blob);
+    console.log('[Share Engine] Catbox Upload Success:', catboxUrl);
+    return catboxUrl;
+  } catch (err: any) {
+    console.warn('[Share Engine] Catbox Provider failed:', err?.message || err);
+    errors.push(`Catbox: ${err?.message}`);
   }
 
-  const json = await response.json();
-  if (json && json.data && (json.data.url || json.data.display_url)) {
-    return json.data.url || json.data.display_url;
+  // Try tmpfiles.org second
+  try {
+    console.log('[Share Engine] Attempting upload via tmpfiles.org...');
+    const tmpUrl = await uploadToTmpFiles(blob);
+    console.log('[Share Engine] tmpfiles.org Upload Success:', tmpUrl);
+    return tmpUrl;
+  } catch (err: any) {
+    console.warn('[Share Engine] tmpfiles.org Provider failed:', err?.message || err);
+    errors.push(`tmpfiles: ${err?.message}`);
   }
 
-  throw new Error('Image storage service returned invalid response');
+  // Try ImgBB third
+  try {
+    console.log('[Share Engine] Attempting upload via ImgBB...');
+    const imgbbUrl = await uploadToImgBB(blob);
+    console.log('[Share Engine] ImgBB Upload Success:', imgbbUrl);
+    return imgbbUrl;
+  } catch (err: any) {
+    console.warn('[Share Engine] ImgBB Provider failed:', err?.message || err);
+    errors.push(`ImgBB: ${err?.message}`);
+  }
+
+  throw new Error(`All public storage upload providers failed (${errors.join('; ')})`);
 }
 
 /**
@@ -92,12 +185,13 @@ export async function prepareXShare(
   const currentHash = computeConfigHash(format, userImg, pfpConfig, idCardConfig);
 
   if (cachedShare && cachedShare.configHash === currentHash) {
+    console.log('[Share Engine] Reusing cached share result:', cachedShare.result);
     if (onStatusChange) onStatusChange('Reusing existing share link...');
     return cachedShare.result;
   }
 
   // 2. High-Resolution PNG Render
-  if (onStatusChange) onStatusChange('Preparing high-resolution graphic...');
+  if (onStatusChange) onStatusChange('Preparing image...');
 
   let renderResult;
   if (format === 'PFP_FRAME') {
@@ -107,13 +201,17 @@ export async function prepareXShare(
   }
 
   // 3. Upload to Public Storage
-  if (onStatusChange) onStatusChange('Creating public share link...');
+  if (onStatusChange) onStatusChange('Uploading...');
 
   const publicImageUrl = await uploadToPublicStorage(renderResult.blob);
 
-  // 4. Generate Unique Share ID & URLs
+  // 4. Generate Unique Share ID & Public Share Page URL
+  if (onStatusChange) onStatusChange('Creating share link...');
+
   const shareId = generateUniqueShareId();
   const domain = window.location.origin || 'https://framein-goa.vercel.app';
+  
+  // Clean Share URL pointing to /share/:shareId
   const shareUrl = `${domain}/share/${shareId}?img=${encodeURIComponent(publicImageUrl)}`;
 
   const captionText = `Just framed my builder identity for HH Goa 2026 🚀\n\n#FrameInGoa\n\n${shareUrl}`;
@@ -126,7 +224,9 @@ export async function prepareXShare(
     tweetUrl
   };
 
-  // Cache result
+  console.log('[Share Engine] Share Preparation Complete:', result);
+
+  // Cache result for current config
   cachedShare = {
     configHash: currentHash,
     result
@@ -146,6 +246,8 @@ export async function executeXPostFlow(
   onStatusChange?: (statusText: string) => void
 ): Promise<ShareResult> {
   const shareResult = await prepareXShare(userImg, format, pfpConfig, idCardConfig, onStatusChange);
+
+  if (onStatusChange) onStatusChange('Opening X...');
 
   // Open X Composer in new window / tab
   const width = 600;
