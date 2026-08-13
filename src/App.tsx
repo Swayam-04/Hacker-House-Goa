@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { AppFormat, PFPFrameConfig, IDCardConfig, ImageTransform } from './types/frame';
+import { PFP_THEMES, IDCARD_THEMES } from './constants/frameStyles';
+import { generateUniqueBuilderId, getRandomBuilderTitle } from './constants/builderTitles';
+import { SAMPLE_AVATARS } from './constants/samplePhotos';
+import { formatGenerationDate } from './utils/dateUtils';
+import { loadImageSource, ImageLoadResult } from './utils/imageUtils';
 import { renderPFPFrame } from './utils/canvas/renderPFPFrame';
 import { renderBuilderCard } from './utils/canvas/renderBuilderCard';
-import { ImageLoadResult, loadImageSource } from './utils/imageUtils';
-import { formatGenerationDate } from './utils/dateUtils';
-import { generateUniqueBuilderId } from './utils/canvas/drawCode128Barcode';
-import { SampleAvatar, SAMPLE_AVATARS } from './constants/samplePhotos';
+import confetti from 'canvas-confetti';
 
+// Components
 import { Navbar } from './components/Navbar';
 import { LandingHero } from './components/LandingHero';
 import { FormatSelector } from './components/FormatSelector';
@@ -15,13 +18,11 @@ import { PhotoAdjuster } from './components/PhotoAdjuster';
 import { PFPFrameEditor } from './components/PFPFrameEditor';
 import { IDCardEditor } from './components/IDCardEditor';
 import { PreviewPanel } from './components/PreviewPanel';
-import { ShareModal } from './components/ShareModal';
 import { FullScreenPreviewModal } from './components/FullScreenPreviewModal';
+import { ShareModal } from './components/ShareModal';
 import { MobileActionBar } from './components/MobileActionBar';
 import { Footer } from './components/Footer';
-
-import { Sliders, AlertCircle, Sparkles, Loader2 } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import { Loader2, AlertCircle, Sparkles, Sliders } from 'lucide-react';
 
 const DEFAULT_TRANSFORM: ImageTransform = {
   x: 0,
@@ -35,83 +36,81 @@ const DEFAULT_TRANSFORM: ImageTransform = {
 export function App() {
   const [currentFormat, setCurrentFormat] = useState<AppFormat>('PFP_FRAME');
   const [userImage, setUserImage] = useState<HTMLImageElement | null>(null);
-  const [showAdjuster, setShowAdjuster] = useState<boolean>(false);
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [isFullScreenOpen, setIsFullScreenOpen] = useState<boolean>(false);
 
-  // Initial generation date captured from browser Date()
-  const initialDate = formatGenerationDate(new Date());
-
-  // Format A Config
+  // Format A: PFP Frame Config
   const [pfpConfig, setPfpConfig] = useState<PFPFrameConfig>({
-    theme: 'cyber-wave',
+    theme: PFP_THEMES[0].id,
     shape: 'circle',
     badgeText: 'HH GOA 2026 BUILDER',
     teamName: 'Team NeuralSurf',
     showCoordinates: true,
     transform: { ...DEFAULT_TRANSFORM },
-    generationDate: initialDate
+    generationDate: formatGenerationDate()
   });
 
-  // Format B Config (Deterministic Code 128 Unique ID)
+  // Format B: ID Card Config
   const [idCardConfig, setIdCardConfig] = useState<IDCardConfig>({
     name: 'Swayam Dev',
-    teamName: 'Team NeuralSurf',
-    role: 'Full Stack & AI',
-    builderTitle: 'AI ARCHITECT',
-    motto: 'Shipped in Goa 🌴',
-    theme: 'cyber-pass',
+    role: 'Full Stack AI Engineer',
+    builderTitle: getRandomBuilderTitle(),
     badgeNumber: generateUniqueBuilderId('Swayam Dev'),
+    motto: 'Building intelligent web experiences for Goa Hackerhouse',
+    theme: IDCARD_THEMES[0].id,
+    teamName: 'NeuralSurf',
     transform: { ...DEFAULT_TRANSFORM },
-    generationDate: initialDate
+    generationDate: formatGenerationDate()
   });
 
+  // UI Drawer & Modal states
+  const [showAdjuster, setShowAdjuster] = useState(false);
+  const [isFullScreenOpen, setIsFullScreenOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
 
-  // Initialize with Sample Avatar 1 on first load for instant live preview!
+  // Load default sample avatar on initial startup
   useEffect(() => {
-    loadImageSource(SAMPLE_AVATARS[0].avatarUrl)
+    let isMounted = true;
+    const defaultSample = SAMPLE_AVATARS[0];
+
+    loadImageSource(defaultSample.avatarUrl)
       .then(res => {
-        setUserImage(res.image);
+        if (isMounted) {
+          setUserImage(res.image);
+        }
       })
-      .catch(console.error);
+      .catch(err => {
+        console.warn('Default sample load fallback:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Handle Photo Upload
-  const handleImageLoaded = (
-    result: ImageLoadResult,
-    _fileOrUrl: File | string,
-    sampleInfo?: SampleAvatar
-  ) => {
+  // Image load handler
+  const handleImageLoaded = (result: ImageLoadResult, fileOrUrl: File | string) => {
     setUserImage(result.image);
-    const currentDate = formatGenerationDate(new Date());
+    setGenerationError(null);
 
-    const freshTransform = { ...DEFAULT_TRANSFORM };
-    const newName = sampleInfo ? sampleInfo.name : idCardConfig.name;
-
-    setPfpConfig(prev => ({ ...prev, transform: freshTransform, generationDate: currentDate }));
+    // Reset offsets for new photo
+    setPfpConfig(prev => ({
+      ...prev,
+      transform: { ...DEFAULT_TRANSFORM }
+    }));
     setIdCardConfig(prev => ({
       ...prev,
-      transform: freshTransform,
-      generationDate: currentDate,
-      name: newName,
-      badgeNumber: generateUniqueBuilderId(newName),
-      role: sampleInfo ? sampleInfo.role : prev.role,
-      builderTitle: sampleInfo ? sampleInfo.title : prev.builderTitle
+      transform: { ...DEFAULT_TRANSFORM }
     }));
   };
 
-  // Replace Image (keeps format and card text fields, updates generation date)
+  // Image replacement from toolbar
   const handleReplaceImage = (result: ImageLoadResult) => {
     setUserImage(result.image);
-    const currentDate = formatGenerationDate(new Date());
-    const freshTransform = { ...DEFAULT_TRANSFORM };
-    setPfpConfig(prev => ({ ...prev, transform: freshTransform, generationDate: currentDate }));
-    setIdCardConfig(prev => ({ ...prev, transform: freshTransform, generationDate: currentDate }));
+    setGenerationError(null);
   };
 
-  // Live Transform Update
+  // Transform change handlers
   const handleTransformChange = (newTransform: ImageTransform) => {
     if (currentFormat === 'PFP_FRAME') {
       setPfpConfig(prev => ({ ...prev, transform: newTransform }));
@@ -120,23 +119,17 @@ export function App() {
     }
   };
 
-  // Reset Transform
   const handleResetTransform = () => {
     handleTransformChange({ ...DEFAULT_TRANSFORM });
   };
 
-  // Format Switch Handler
+  // Format switching
   const handleSelectFormat = (format: AppFormat) => {
     setCurrentFormat(format);
-    const element = document.getElementById('editor-workspace');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
   };
 
-  // Reset/Clear Image & Generate New Unique ID
+  // Global reset
   const handleResetAll = () => {
-    setUserImage(null);
     const currentDate = formatGenerationDate(new Date());
     setPfpConfig(prev => ({ ...prev, transform: { ...DEFAULT_TRANSFORM }, generationDate: currentDate }));
     setIdCardConfig(prev => ({
@@ -339,7 +332,10 @@ export function App() {
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
         onDownload={handleDownload}
-        formatName={currentFormat === 'PFP_FRAME' ? 'Format A: PFP Overlay' : 'Format B: Builder ID Card'}
+        userImg={userImage}
+        format={currentFormat}
+        pfpConfig={pfpConfig}
+        idCardConfig={idCardConfig}
       />
 
       {/* Mobile Sticky Action Bar */}

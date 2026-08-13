@@ -40,3 +40,15 @@ export function getRandomBuilderTitle(): string {
   const index = Math.floor(Math.random() * PRESET_BUILDER_TITLES.length);
   return PRESET_BUILDER_TITLES[index];
 }
+
+export function generateUniqueBuilderId(name: string = 'BUILDER'): string {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .map(word => word[0])
+    .join('')
+    .substring(0, 2)
+    .toUpperCase() || 'SB';
+  const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
+  return `HHGOA26-${initials}-${randomStr}`;
+}
