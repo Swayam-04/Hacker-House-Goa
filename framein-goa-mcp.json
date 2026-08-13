@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "framein-goa": {
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "env": {
+        "FRAMEINGOA_MODE": "local"
+      }
+    }
+  }
+}
